@@ -10,8 +10,8 @@ class Env(object):
     rewards were selected according to a mean q∗(a) unit variance normal distribution, as suggested by these gray
     distributions.
     """
-    def __init__(self, k):
-        self.q_a_real = np.random.normal(size=k)
+    def __init__(self, k, true_reward=0.):
+        self.q_a_real = np.random.normal(size=k) + true_reward
 
     def show_distribution(self):
         q_list = []
@@ -32,14 +32,17 @@ class Env(object):
 
 class Agent(object):
     """methods: e-greedy method, ucb, gradient"""
-    def __init__(self, k=10, init_value=0.0, epsilon=0.0, method="e-greedy"):
+    def __init__(self, k=10, init_value=0.0, epsilon=0.0, ucb=2.0, method="e-greedy", gradient_baseline=False):
         self.value_function = np.array([init_value] * k, dtype=np.float32)
         self.k = k
         self.step = 1
         self.epsilon = epsilon
+        self.ucb = ucb
         self.action_selected_count = {}
         self.method = method
         self.action_count = np.zeros_like(self.value_function, dtype=np.int32)
+        self.gradient_baseline = gradient_baseline
+        self.average_reward = 0.0
 
     def guess(self):
         # exploration or exploitation
@@ -49,7 +52,11 @@ class Agent(object):
         if self.method == "e-greedy":
             action = np.argmax(self.value_function)
         elif self.method == "ucb":
-            action = np.argmax(self.value_function + 2 * np.sqrt(np.log(self.step) / (self.action_count + 1e-5)))
+            action = np.argmax(self.value_function + self.ucb * np.sqrt(np.log(self.step) / (self.action_count + 1e-5)))
+        elif self.method == "gradient":
+            exp_est = np.exp(self.value_function)
+            self.action_prob = exp_est / np.sum(exp_est)
+            return np.random.choice(self.k, p=self.action_prob)
         check = np.where(self.value_function == self.value_function[action])[0]
         if len(check) == 0:
             return action
@@ -60,8 +67,18 @@ class Agent(object):
         self.action_count[action] += 1
 
         self.action_selected_count[action] = self.action_selected_count.get(action, 0) + 1
-        action_value_before = self.value_function[action]
-        self.value_function[action] = self.value_function[action] + (1 / self.step) * (reward - self.value_function[action])
+        # action_value_before = self.value_function[action]
+        if self.method == "gradient":
+            self.average_reward = (self.step - 1.0) / self.step * self.average_reward + reward / self.step
+            one_hot = np.zeros(self.k)
+            one_hot[action] = 1
+            if self.gradient_baseline:
+                baseline = self.average_reward
+            else:
+                baseline = 0
+            self.value_function = self.value_function + (1 / self.step) * (reward - baseline) * (one_hot - self.action_prob)
+        else:
+            self.value_function[action] = self.value_function[action] + (1 / self.step) * (reward - self.value_function[action])
         # print("action {} changed from {} to {}".format(action, action_value_before, self.value_function[action]))
         self.step += 1
 
@@ -90,23 +107,37 @@ if __name__ == "__main__":
     k = 10
     env = Env(k=k)
 
-    # e-greedy
-    agent = Agent(k=k, init_value=1.0, epsilon=0.1)
+    # e-greedy ####################################################
+    # agent = Agent(k=k, init_value=1.0, epsilon=0.1)
+    # reward_receive = train(agent, env)
+    # print("total_rewards: {}".format(sum(reward_receive)))
+    # # plot_mean_reward(reward_receive, "e-greedy")
+    #
+    # print("q_a_real")
+    # print(env.q_a_real)
+    # print("value_function")
+    # print(agent.value_function)
+    # print(agent.action_selected_count)
+
+    # ucb #########################################################
+    # agent = Agent(k=k, init_value=0.0, epsilon=0.0, method="ucb")
+    # reward_receive = train(agent, env)
+    # print("total_rewards: {}".format(sum(reward_receive)))
+    # # plot_mean_reward(reward_receive, "ucb")
+    #
+    # print("q_a_real")
+    # print(env.q_a_real)
+    # print("value_function")
+    # print(agent.value_function)
+    # print(agent.action_selected_count)
+
+    # gradient ####################################################
+    env = Env(k=k, true_reward=4.)
+    agent = Agent(k=k, init_value=0.0, epsilon=0.1, method="gradient")
     reward_receive = train(agent, env)
+    print("total_rewards: {}".format(sum(reward_receive)))
 
-    # plot_mean_reward(reward_receive, "e-greedy")
-
-    print("q_a_real")
-    print(env.q_a_real)
-    print("value_function")
-    print(agent.value_function)
-    print(agent.action_selected_count)
-
-    # ucb
-    agent = Agent(k=k, init_value=1.0, epsilon=0.0, method="ucb")
-    reward_receive = train(agent, env)
-
-    # plot_mean_reward(reward_receive, "ucb")
+    plot_mean_reward(reward_receive, "ucb")
 
     print("q_a_real")
     print(env.q_a_real)
